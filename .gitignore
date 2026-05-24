@@ -1,0 +1,7 @@
+*.xlsx
+*.xls
+*.log
+__pycache__/
+.streamlit/credentials.toml
+streamlit.log
+~$*
