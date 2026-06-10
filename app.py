@@ -271,7 +271,20 @@ with tab2:
 
                 # OR: load each file separately, track file source
                 # Color palette per OR file (up to 6 files)
-                OR_FILE_COLORS = ['AED6F1','A9DFBF','D7BDE2','FAD7A0','FDEBD0','B2EBF2']
+                OR_FILE_COLORS = [
+                    'AED6F1',  # OR1 蓝
+                    'A9DFBF',  # OR2 绿
+                    'D7BDE2',  # OR3 紫
+                    'FAD7A0',  # OR4 橙黄
+                    'F9EBEA',  # OR5 浅粉
+                    'B2EBF2',  # OR6 青
+                    'FCF3CF',  # OR7 淡黄
+                    'D5F5E3',  # OR8 薄荷绿
+                    'FADBD8',  # OR9 玫瑰
+                    'D6EAF8',  # OR10 天蓝
+                    'E8DAEF',  # OR11 薰衣草
+                    'FDEBD0',  # OR12 米黄
+                ]
                 OR_FILE_NAMES  = [f.name for f in t2_or]
 
                 or_map = {}
