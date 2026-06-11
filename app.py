@@ -485,7 +485,7 @@ with tab2:
                 total_claim   = df_cancel['Potential Claim (RM)'].sum() if len(df_cancel) else 0.0
                 total_released= df_main['Product Price (RM)'].sum()
                 total_or_pay  = df_main['OR Pay'].fillna(0).sum()
-                df_prob       = df_main[df_main['Issue'] != 'OK']
+                df_prob       = df_main[~df_main['Issue'].isin(['OK', 'Cancelled+Fee'])]
 
                 # Build Excel
                 COLS2 = [
@@ -632,6 +632,13 @@ with tab2:
                                     cell.font = Font(bold=True, color='FFFFFF')
                                 else:
                                     cell.fill = mk_fill('C8E6C9')
+                            elif col == 'Amt Diff(Price-OR)':
+                                diff = val if isinstance(val, (int, float)) else None
+                                if diff is not None and abs(diff) > 0.02:
+                                    cell.fill = mk_fill('FF6B6B')
+                                    cell.font = Font(bold=True, color='FFFFFF')
+                                else:
+                                    cell.fill = mk_fill(clr)
                             else:
                                 cell.fill = mk_fill(clr)
                             cell.border = mk_border()
