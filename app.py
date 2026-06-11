@@ -650,10 +650,24 @@ with tab2:
                 write_rows_offset(ws2b, df_main, COL_ORDER2, hdr_row_xl + 1)
 
                 ws3 = wb2.create_sheet('3_Problems')
-                ws3.sheet_view.showGridLines = False; ws3.freeze_panes = 'A2'
-                write_header(ws3, 1, COL_ORDER2, [c[1] for c in COLS2])
-                ws3.row_dimensions[1].height = 32
-                write_rows(ws3, df_prob.sort_values('Issue'), COL_ORDER2)
+                ws3.sheet_view.showGridLines = False
+                # Color legend (same as Sheet 2)
+                leg3 = 1
+                for lbl, clr in legend_items:
+                    cell = ws3.cell(row=leg3, column=1, value=lbl)
+                    cell.fill = mk_fill(clr)
+                    cell.font = Font(bold=True, size=10)
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
+                    cell.border = mk_border()
+                    ws3.row_dimensions[leg3].height = 18
+                    leg3 += 1
+                ws3.row_dimensions[leg3].height = 8
+                leg3 += 1
+                hdr3 = leg3
+                write_header(ws3, hdr3, COL_ORDER2, [c[1] for c in COLS2])
+                ws3.row_dimensions[hdr3].height = 32
+                ws3.freeze_panes = ws3.cell(row=hdr3 + 1, column=1).coordinate
+                write_rows_offset(ws3, df_prob.sort_values('Issue'), COL_ORDER2, hdr3 + 1)
 
                 ws4 = wb2.create_sheet('4_Cancel_Analysis')
                 ws4.sheet_view.showGridLines = False; ws4.freeze_panes = 'A2'
