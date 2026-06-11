@@ -459,10 +459,12 @@ with tab2:
 
                 income_invs  = set(df_main['Inv No'].astype(str))
                 or_unmatched = [
-                    {'Inv No':no,'OR Date':od['date'],'OR Org Amt':od['org_amt'],
+                    {'Inv No':no,'OR File':od.get('file_name',''),'OR Date':od['date'],
+                     'OR Org Amt':od['org_amt'],
                      'OR Pay':od['pay'],'OR Outstanding':od['outstanding'],
                      'Collected':'Yes' if od['collected'] else 'No',
                      'Knock Off Date':od['knock_off'],
+                     'row_color': OR_FILE_COLORS[od.get('file_idx',0) % len(OR_FILE_COLORS)],
                      'Note':'In OR but no matching Order ID in Income (probably prior month)'}
                     for no, od in or_map.items() if no not in income_invs
                 ]
@@ -710,19 +712,37 @@ with tab2:
                             cell.number_format='#,##0.00'; cell.font=Font(bold=True)
 
                 ws5 = wb2.create_sheet('5_OR_Unmatched')
-                ws5.sheet_view.showGridLines = False; ws5.freeze_panes = 'A2'
-                COLS5=[('Inv No',18),('OR Date',14),('OR Org Amt',13),('OR Pay',11),
+                ws5.sheet_view.showGridLines = False
+                COLS5=[('Inv No',18),('OR File',28),('OR Date',14),('OR Org Amt',13),('OR Pay',11),
                        ('OR Outstanding',14),('Collected',10),('Knock Off Date',14),('Note',45)]
                 COL5=[c[0] for c in COLS5]
-                write_header(ws5, 1, COL5, [c[1] for c in COLS5])
                 AMT5={'OR Org Amt','OR Pay','OR Outstanding'}
+                # Color legend at top
+                leg5 = 1
+                for lbl, clr in legend_items:
+                    cell = ws5.cell(row=leg5, column=1, value=lbl)
+                    cell.fill = mk_fill(clr)
+                    cell.font = Font(bold=True, size=10)
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
+                    cell.border = mk_border()
+                    ws5.row_dimensions[leg5].height = 18
+                    leg5 += 1
+                ws5.row_dimensions[leg5].height = 8
+                leg5 += 1
+                hdr5 = leg5
+                write_header(ws5, hdr5, COL5, [c[1] for c in COLS5])
+                ws5.row_dimensions[hdr5].height = 32
+                ws5.freeze_panes = ws5.cell(row=hdr5 + 1, column=1).coordinate
                 if len(df_or_unmatched)>0:
-                    for r_i,(_, row) in enumerate(df_or_unmatched.iterrows(), 2):
+                    # Sort by OR file
+                    df_or_unmatched_sorted = df_or_unmatched.sort_values('OR File') if 'OR File' in df_or_unmatched.columns else df_or_unmatched
+                    for r_i,(_, row) in enumerate(df_or_unmatched_sorted.iterrows(), hdr5 + 1):
+                        clr = row.get('row_color', 'D3D3D3')
                         for c_i,col in enumerate(COL5,1):
                             val=row.get(col,'')
                             if isinstance(val,float) and pd.isna(val): val=''
                             cell=ws5.cell(row=r_i,column=c_i,value=val)
-                            cell.fill=mk_fill('D3D3D3'); cell.border=mk_border()
+                            cell.fill=mk_fill(clr); cell.border=mk_border()
                             if col in AMT5:
                                 cell.number_format='#,##0.00'
                                 cell.alignment=Alignment(horizontal='right',vertical='center')
