@@ -749,6 +749,103 @@ with tab2:
                             else:
                                 cell.alignment=Alignment(horizontal='left',vertical='center')
 
+                # ── Sheet 6: Detailed Summary ──────────────────────────────
+                ws6 = wb2.create_sheet('6_Detail_Summary')
+                ws6.sheet_view.showGridLines = False
+                ws6.column_dimensions['A'].width = 30
+                ws6.column_dimensions['B'].width = 18
+                ws6.column_dimensions['C'].width = 18
+                ws6.column_dimensions['D'].width = 18
+                ws6.column_dimensions['E'].width = 22
+
+                def s6_title(row, text):
+                    c = ws6.cell(row=row, column=1, value=text)
+                    c.fill = mk_fill(C_HEADER)
+                    c.font = Font(bold=True, color='FFFFFF', size=11)
+                    c.alignment = Alignment(horizontal='left', vertical='center')
+                    ws6.merge_cells(f'A{row}:E{row}')
+                    ws6.row_dimensions[row].height = 24
+
+                def s6_hdr(row, labels):
+                    for ci, lbl in enumerate(labels, 1):
+                        c = ws6.cell(row=row, column=ci, value=lbl)
+                        c.fill = mk_fill('4A7DB8')
+                        c.font = Font(bold=True, color='FFFFFF', size=10)
+                        c.alignment = Alignment(horizontal='center', vertical='center')
+                        c.border = mk_border()
+                    ws6.row_dimensions[row].height = 20
+
+                def s6_row(row, vals, clr='FFFFFF', bold=False):
+                    for ci, val in enumerate(vals, 1):
+                        c = ws6.cell(row=row, column=ci, value=val)
+                        c.fill = mk_fill(clr)
+                        c.font = Font(bold=bold, size=10)
+                        c.border = mk_border()
+                        if ci > 1 and isinstance(val, (int, float)):
+                            c.number_format = '#,##0.00'
+                            c.alignment = Alignment(horizontal='right', vertical='center')
+                        else:
+                            c.alignment = Alignment(horizontal='left', vertical='center')
+                    ws6.row_dimensions[row].height = 18
+
+                cur = 1
+
+                # ── Section 1: Per OR File Match Summary ──
+                s6_title(cur, '① 各 OR 文件匹配汇总'); cur += 1
+                s6_hdr(cur, ['OR 文件', '匹配张数', '总 OR Org Amt (RM)', '总 OR Pay (RM)', '已收款张数']); cur += 1
+                df_matched = df_main[df_main['OR File'] != '']
+                for fname in OR_FILE_NAMES:
+                    sub = df_matched[df_matched['OR File'] == fname]
+                    collected_cnt = (sub['Issue'] == 'OK').sum()
+                    clr = OR_FILE_COLORS[OR_FILE_NAMES.index(fname) % len(OR_FILE_COLORS)]
+                    s6_row(cur, [fname, len(sub),
+                                 round(sub['OR Org Amt'].fillna(0).sum(), 2),
+                                 round(sub['OR Pay'].fillna(0).sum(), 2),
+                                 collected_cnt], clr=clr); cur += 1
+                # Total row
+                s6_row(cur, ['TOTAL', len(df_matched),
+                             round(df_matched['OR Org Amt'].fillna(0).sum(), 2),
+                             round(df_matched['OR Pay'].fillna(0).sum(), 2),
+                             (df_matched['Issue'] == 'OK').sum()],
+                       clr='D5D8DC', bold=True); cur += 1
+                cur += 1  # blank
+
+                # ── Section 2: Amt Diff(Price-OR) Summary ──
+                s6_title(cur, '② 价钱差异汇总  Amt Diff (Product Price − OR Org Amt)'); cur += 1
+                df_diff = df_main[df_main['Amt Diff(Price-OR)'].apply(
+                    lambda x: isinstance(x, (int, float)) and not pd.isna(x) and abs(x) > 0.02)].copy()
+                s6_hdr(cur, ['Order ID', 'Inv No', 'Product Price (RM)', 'OR Org Amt (RM)', 'Amt Diff (RM)']); cur += 1
+                if len(df_diff) > 0:
+                    for _, rw in df_diff.iterrows():
+                        clr = rw.get('row_color', 'FFFFFF')
+                        s6_row(cur, [rw['Order ID'], rw['Inv No'],
+                                     rw['Product Price (RM)'], rw['OR Org Amt'],
+                                     rw['Amt Diff(Price-OR)']], clr=clr); cur += 1
+                    s6_row(cur, ['TOTAL 差异', '', '', '',
+                                 round(df_diff['Amt Diff(Price-OR)'].sum(), 2)],
+                           clr='D5D8DC', bold=True); cur += 1
+                else:
+                    s6_row(cur, ['✅ 全部价钱一致，无差异', '', '', '', ''], clr='C8E6C9'); cur += 1
+                cur += 1  # blank
+
+                # ── Section 3: Payout Gap Summary ──
+                s6_title(cur, '③ 到手金额差异汇总  Payout Gap (Calc Subtotal − Net Payout)'); cur += 1
+                df_gap = df_main[df_main['Payout Gap'].apply(
+                    lambda x: isinstance(x, (int, float)) and not pd.isna(x) and abs(x) > 0.02)].copy()
+                s6_hdr(cur, ['Order ID', 'Inv No', 'Calc Subtotal (RM)', 'Net Payout (RM)', 'Payout Gap (RM)']); cur += 1
+                if len(df_gap) > 0:
+                    for _, rw in df_gap.sort_values('Payout Gap').iterrows():
+                        clr = rw.get('row_color', 'FFFFFF')
+                        s6_row(cur, [rw['Order ID'], rw['Inv No'],
+                                     rw['Calc Subtotal'], rw['Net Payout (RM)'],
+                                     rw['Payout Gap']], clr=clr); cur += 1
+                    s6_row(cur, ['TOTAL 差异', '', '', '',
+                                 round(df_gap['Payout Gap'].sum(), 2)],
+                           clr='D5D8DC', bold=True); cur += 1
+                else:
+                    s6_row(cur, ['✅ 全部到手金额一致，无差异', '', '', '', ''], clr='C8E6C9'); cur += 1
+                # ────────────────────────────────────────────────────────────
+
                 buf2 = io.BytesIO()
                 wb2.save(buf2); buf2.seek(0)
 
