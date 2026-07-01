@@ -844,6 +844,55 @@ with tab2:
                            clr='D5D8DC', bold=True); cur += 1
                 else:
                     s6_row(cur, ['✅ 全部到手金额一致，无差异', '', '', '', ''], clr='C8E6C9'); cur += 1
+                cur += 1  # blank
+
+                # ── Section 4: Shopee Fee Breakdown ──
+                ws6.column_dimensions['C'].width = 20
+                ws6.column_dimensions['D'].width = 20
+                ws6.column_dimensions['E'].width = 20
+                s6_title(cur, '④ Shopee 平台费用明细汇总'); cur += 1
+                s6_hdr(cur, ['费用类型', '总金额 (RM)', '占总货价 %', '张数 (有收费)', '平均每单 (RM)']); cur += 1
+
+                total_price_base = df_main['Product Price (RM)'].sum()
+                def fee_pct(amt):
+                    return round(abs(amt) / total_price_base * 100, 2) if total_price_base else 0
+                def fee_avg(amt, cnt):
+                    return round(abs(amt) / cnt, 2) if cnt else 0
+
+                fee_rows = [
+                    ('佣金 Commission Fee',      df_main['Commission'].sum()),
+                    ('服务费 Service Fee',        df_main['Service Fee'].sum()),
+                    ('交易费 Transaction Fee',    df_main['Txn Fee'].sum()),
+                    ('AMS 佣金 AMS Fee',          df_main['AMS Fee'].sum()),
+                    ('广告托管 Ads Escrow',        df_main['Ads Escrow'].sum()),
+                    ('卖家自付优惠券 Voucher(Seller)', df_main['Voucher(Seller)'].sum()),
+                ]
+                clrs = ['FDECEA','FFF3E0','E8F5E9','E3F2FD','F3E5F5','FFF9C4']
+                total_all_fees = 0
+                for idx, (name, total_amt) in enumerate(fee_rows):
+                    cnt = (df_main['Commission'].abs() > 0.01).sum() if '佣金' in name else \
+                          (df_main['Service Fee'].abs() > 0.01).sum() if '服务费' in name else \
+                          (df_main['Txn Fee'].abs() > 0.01).sum() if '交易费' in name else \
+                          (df_main['AMS Fee'].abs() > 0.01).sum() if 'AMS' in name else \
+                          (df_main['Ads Escrow'].abs() > 0.01).sum() if '广告' in name else \
+                          (df_main['Voucher(Seller)'].abs() > 0.01).sum()
+                    s6_row(cur, [name, round(total_amt, 2), f'{fee_pct(total_amt):.2f}%',
+                                 int(cnt), fee_avg(total_amt, cnt)], clr=clrs[idx % len(clrs)]); cur += 1
+                    if '优惠券' not in name:
+                        total_all_fees += abs(total_amt)
+
+                # Grand total (excluding voucher which is seller-initiated)
+                s6_row(cur, ['★ 平台抽费合计 (不含优惠券)',
+                             round(-total_all_fees, 2),
+                             f'{fee_pct(total_all_fees):.2f}%', '', ''],
+                       clr='FFCDD2', bold=True); cur += 1
+                s6_row(cur, ['总货价 (Product Price)',
+                             round(total_price_base, 2), '100.00%', '', ''],
+                       clr='D5D8DC', bold=True); cur += 1
+                s6_row(cur, ['实际到手 (Net Payout)',
+                             round(df_main['Net Payout (RM)'].sum(), 2),
+                             f'{fee_pct(df_main["Net Payout (RM)"].sum()):.2f}%', '', ''],
+                       clr='C8E6C9', bold=True); cur += 1
                 # ────────────────────────────────────────────────────────────
 
                 buf2 = io.BytesIO()
