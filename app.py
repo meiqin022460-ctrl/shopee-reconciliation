@@ -118,6 +118,23 @@ with tab1:
                     st.error("找不到 'Order ID' 列，请确认文件格式正确。")
                     st.stop()
 
+                # Find "View By" column to filter out SKU rows
+                view_by_col = None
+                for cell in ws[hdr_row]:
+                    if str(cell.value).strip() == 'View By':
+                        view_by_col = cell.column
+                        break
+
+                # Delete SKU rows (keep only View By == 'Order'), scan bottom-up to avoid index shift
+                if view_by_col:
+                    rows_to_delete = []
+                    for row_num in range(hdr_row + 1, ws.max_row + 1):
+                        val = str(ws.cell(row=row_num, column=view_by_col).value or '').strip()
+                        if val and val != 'Order':
+                            rows_to_delete.append(row_num)
+                    for row_num in reversed(rows_to_delete):
+                        ws.delete_rows(row_num)
+
                 # Insert new column right after Order ID column
                 new_col = order_id_col + 1
                 ws.insert_cols(new_col)
