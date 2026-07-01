@@ -118,14 +118,11 @@ with tab1:
                     st.error("找不到 'Order ID' 列，请确认文件格式正确。")
                     st.stop()
 
-                # Find actual last column with data in header row
-                last_col = 1
-                for col in range(1, 200):
-                    if ws.cell(row=hdr_row, column=col).value is not None:
-                        last_col = col
-                new_col = last_col + 1
+                # Insert new column right after Order ID column
+                new_col = order_id_col + 1
+                ws.insert_cols(new_col)
 
-                # Add "Inv No" header with yellow fill (matching 123.png reference)
+                # Add "Inv No" header with yellow fill — right next to Order ID
                 yellow = mk_fill('FFFF00')
                 hdr_cell = ws.cell(row=hdr_row, column=new_col, value='Inv No')
                 hdr_cell.fill = yellow
@@ -147,6 +144,9 @@ with tab1:
                         c.fill = yellow
                         matched += 1
                     else:
+                        c = ws.cell(row=row_num, column=new_col, value='❌ 找不到')
+                        c.fill = mk_fill('FFB3B3')
+                        c.font = Font(color='CC0000')
                         unmatched += 1
 
                 buf = io.BytesIO()
