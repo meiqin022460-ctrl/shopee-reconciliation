@@ -1032,9 +1032,11 @@ with tab2:
                         cancelled_rows = [(oid, info) for oid, info in ord_all.items()
                                          if info['status'] == 'Cancelled' and oid not in inc_ids_set]
                         s7_title(r7, '① 出货前取消（Income 不会出现，正常）', '7F8C8D'); r7 += 1
-                        s7_hdr(r7, ['Order ID', 'Cancel Reason', 'Grand Total (RM)', '', '', '']); r7 += 1
+                        s7_hdr(r7, ['Order ID', 'Inv No', 'Cancel Reason', 'Grand Total (RM)', '', '']); r7 += 1
                         for oid, info in cancelled_rows[:200]:
-                            s7_row(r7, [oid, info['cancel_reason'][:60], info['grand_total'], '', '', ''], clr='E8E8E8'); r7 += 1
+                            inv = ship_to_inv.get(oid, '')
+                            inv = inv if inv and inv != 'nan' else '❌ 找不到'
+                            s7_row(r7, [oid, inv, info['cancel_reason'][:60], info['grand_total'], '', ''], clr='E8E8E8'); r7 += 1
                         s7_row(r7, [f'共 {len(cancelled_rows)} 张取消单', '', '', '', '', ''], clr='D5D8DC'); r7 += 2
 
                     # Section B: Completed but payout next month
@@ -1042,9 +1044,11 @@ with tab2:
                         next_month = [(oid, info) for oid, info in ord_all.items()
                                       if info['status'] == 'Completed' and oid not in inc_ids_set]
                         s7_title(r7, '② 已完成、下个月才到款（正常，会在下期 Income 出现）', '1A5276'); r7 += 1
-                        s7_hdr(r7, ['Order ID', 'Order Complete Time', 'Grand Total (RM)', '', '', '']); r7 += 1
+                        s7_hdr(r7, ['Order ID', 'Inv No', 'Order Complete Time', 'Grand Total (RM)', '', '']); r7 += 1
                         for oid, info in next_month[:200]:
-                            s7_row(r7, [oid, str(info['complete_time']), info['grand_total'], '', '', ''], clr='D6EAF8'); r7 += 1
+                            inv = ship_to_inv.get(oid, '')
+                            inv = inv if inv and inv != 'nan' else '❌ 找不到'
+                            s7_row(r7, [oid, inv, str(info['complete_time']), info['grand_total'], '', ''], clr='D6EAF8'); r7 += 1
                         s7_row(r7, [f'共 {len(next_month)} 张，预计收款 RM {sum(i["grand_total"] for _,i in next_month):,.2f}', '', '', '', '', ''], clr='AED6F1'); r7 += 2
 
                     # Section C: Wallet special transactions
