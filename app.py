@@ -34,20 +34,34 @@ st.title("📊 Shopee 对账系统")
 st.markdown("---")
 
 # ── Shared helpers ─────────────────────────────────────
+_fill_cache = {}
 def mk_fill(h):
-    return PatternFill(start_color=h, end_color=h, fill_type='solid')
+    if h not in _fill_cache:
+        _fill_cache[h] = PatternFill(start_color=h, end_color=h, fill_type='solid')
+    return _fill_cache[h]
 
+_BORDER = None
 def mk_border():
-    s = Side(style='thin', color='AAAAAA')
-    return Border(left=s, right=s, top=s, bottom=s)
+    global _BORDER
+    if _BORDER is None:
+        s = Side(style='thin', color='AAAAAA')
+        _BORDER = Border(left=s, right=s, top=s, bottom=s)
+    return _BORDER
+
+_AL_CENTER  = Alignment(horizontal='center', vertical='center')
+_AL_LEFT    = Alignment(horizontal='left',   vertical='center')
+_AL_RIGHT   = Alignment(horizontal='right',  vertical='center')
+_AL_WRAP    = Alignment(horizontal='center', vertical='center', wrap_text=True)
+_FT_HDR     = Font(bold=True, color='FFFFFF', size=10)
+_FT_BOLD_W  = Font(bold=True, color='FFFFFF')
+_FT_BOLD    = Font(bold=True)
+_FT_NORM    = Font(size=10)
 
 def write_header(ws, row_num, labels, widths=None, bg='2F4F8F'):
     f = mk_fill(bg)
-    ft = Font(bold=True, color='FFFFFF', size=10)
-    al = Alignment(horizontal='center', vertical='center', wrap_text=True)
     for i, lbl in enumerate(labels, 1):
         c = ws.cell(row=row_num, column=i, value=lbl)
-        c.fill = f; c.font = ft; c.alignment = al; c.border = mk_border()
+        c.fill = f; c.font = _FT_HDR; c.alignment = _AL_WRAP; c.border = mk_border()
     if widths:
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
@@ -599,34 +613,7 @@ with tab2:
                 COL_ORDER2 = [c[0] for c in COLS2]
 
                 def write_rows(ws, df, col_order):
-                    for r_i, (_, row) in enumerate(df.iterrows(), 2):
-                        clr = row.get('row_color', 'FFFFFF')
-                        for c_i, col in enumerate(col_order, 1):
-                            val = row.get(col, '')
-                            if isinstance(val, float) and pd.isna(val): val = ''
-                            cell = ws.cell(row=r_i, column=c_i, value=val)
-                            # Payout Gap cell: red if gap != 0, green if 0
-                            if col == 'Payout Gap':
-                                gap = val if isinstance(val, (int, float)) else 0
-                                if abs(gap) > 0.02:
-                                    cell.fill = mk_fill('FF6B6B')  # Red
-                                    cell.font = Font(bold=True, color='FFFFFF')
-                                else:
-                                    cell.fill = mk_fill('C8E6C9')  # Green
-                            else:
-                                cell.fill = mk_fill(clr)
-                            cell.border = mk_border()
-                            if col in AMT_COLS:
-                                cell.number_format = '#,##0.00'
-                                cell.alignment = Alignment(horizontal='right', vertical='center')
-                            elif col in PCT_COLS:
-                                cell.number_format = '0.00"%"'
-                                cell.alignment = Alignment(horizontal='right', vertical='center')
-                            elif col in ('Order ID','Inv No'):
-                                cell.number_format = '@'
-                                cell.alignment = Alignment(horizontal='left', vertical='center')
-                            else:
-                                cell.alignment = Alignment(horizontal='left', vertical='center')
+                    write_rows_offset(ws, df, col_order, 2)
 
                 wb2 = Workbook()
 
@@ -712,40 +699,42 @@ with tab2:
 
                 # Override write_rows to start after legend
                 def write_rows_offset(ws, df, col_order, start_row):
-                    for r_i, (_, row) in enumerate(df.iterrows(), start_row):
-                        clr = row.get('row_color', 'FFFFFF')
-                        for c_i, col in enumerate(col_order, 1):
-                            val = row.get(col, '')
+                    bdr = mk_border()
+                    rows_data = df[col_order].values.tolist()
+                    colors    = df['row_color'].tolist() if 'row_color' in df.columns else ['FFFFFF']*len(df)
+                    for r_i, (row_vals, clr) in enumerate(zip(rows_data, colors), start_row):
+                        fill_row = mk_fill(clr)
+                        for c_i, (col, val) in enumerate(zip(col_order, row_vals), 1):
                             if isinstance(val, float) and pd.isna(val): val = ''
                             cell = ws.cell(row=r_i, column=c_i, value=val)
+                            cell.border = bdr
                             if col == 'Payout Gap':
                                 gap = val if isinstance(val, (int, float)) else 0
                                 if abs(gap) > 0.02:
                                     cell.fill = mk_fill('FF6B6B')
-                                    cell.font = Font(bold=True, color='FFFFFF')
+                                    cell.font = _FT_BOLD_W
                                 else:
                                     cell.fill = mk_fill('C8E6C9')
                             elif col == 'Amt Diff(Price-OR)':
                                 diff = val if isinstance(val, (int, float)) else None
                                 if diff is not None and abs(diff) > 0.02:
                                     cell.fill = mk_fill('FF6B6B')
-                                    cell.font = Font(bold=True, color='FFFFFF')
+                                    cell.font = _FT_BOLD_W
                                 else:
-                                    cell.fill = mk_fill(clr)
+                                    cell.fill = fill_row
                             else:
-                                cell.fill = mk_fill(clr)
-                            cell.border = mk_border()
+                                cell.fill = fill_row
                             if col in AMT_COLS:
                                 cell.number_format = '#,##0.00'
-                                cell.alignment = Alignment(horizontal='right', vertical='center')
+                                cell.alignment = _AL_RIGHT
                             elif col in PCT_COLS:
                                 cell.number_format = '0.00"%"'
-                                cell.alignment = Alignment(horizontal='right', vertical='center')
+                                cell.alignment = _AL_RIGHT
                             elif col in ('Order ID','Inv No'):
                                 cell.number_format = '@'
-                                cell.alignment = Alignment(horizontal='left', vertical='center')
+                                cell.alignment = _AL_LEFT
                             else:
-                                cell.alignment = Alignment(horizontal='left', vertical='center')
+                                cell.alignment = _AL_LEFT
 
                 write_rows_offset(ws2b, df_main, COL_ORDER2, hdr_row_xl + 1)
 
