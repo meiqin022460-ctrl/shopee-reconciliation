@@ -65,14 +65,14 @@ tab1, tab2 = st.tabs(["① 加 Inv No 到 Income 文件", "② 完整对账报�
 # ║  TAB 1 — Add Inv No to Income                     ║
 # ╚════════════════════════════════════════════════════╝
 with tab1:
-    st.subheader("把 5151 的 Doc. No. 加到 Income 报表")
-    st.caption("上传 5151 和 Income 文件 → 系统自动匹配 Shipping Info = Order ID → 在 Income 右边加一列 'Inv No' → 下载")
+    st.subheader("把 ACC INV 的 Doc. No. 加到 Income 报表")
+    st.caption("上传 ACC INV 和 Income 文件 → 系统自动匹配 Shipping Info = Order ID → 在 Income 右边加一列 'Inv No' → 下载")
     st.markdown("")
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**① 5151 发票文件**")
-        t1_5151 = st.file_uploader("5151", type=["xlsx","xls"], key="t1_5151",
+        st.markdown("**① ACC INV 发票文件**")
+        t1_5151 = st.file_uploader("ACC INV", type=["xlsx","xls"], key="t1_5151",
                                     label_visibility="collapsed")
         if t1_5151: st.success(f"✅ {t1_5151.name}")
 
@@ -192,7 +192,7 @@ with tab1:
             )
     else:
         missing = []
-        if not t1_5151:  missing.append("5151 文件")
+        if not t1_5151:  missing.append("ACC INV 文件")
         if not t1_income: missing.append("Income 文件")
         st.info(f"还需要上传：{' / '.join(missing)}")
 
@@ -201,14 +201,14 @@ with tab1:
 # ║  TAB 2 — Full Reconciliation                      ║
 # ╚════════════════════════════════════════════════════╝
 with tab2:
-    st.subheader("完整对账（5151 + Income + OR）")
-    st.caption("三个文件全上传 → 生成彩色对账报告，蓝=已收款 橙=未收款 红=找不到 黄=退货")
+    st.subheader("完整对账（ACC INV + Income + OR）")
+    st.caption("上传文件 → 生成彩色对账报告，包含退货、遗失赔偿、取消单等全部情况")
     st.markdown("")
 
     ca, cb, cc = st.columns(3)
     with ca:
-        st.markdown("**① 5151 发票文件**（可多选）")
-        t2_5151 = st.file_uploader("5151", type=["xlsx","xls"], key="t2_5151",
+        st.markdown("**① ACC INV 发票文件**（可多选）")
+        t2_5151 = st.file_uploader("ACC INV", type=["xlsx","xls"], key="t2_5151",
                                     accept_multiple_files=True, label_visibility="collapsed")
         if t2_5151:
             for f in t2_5151: st.success(f"✅ {f.name}")
@@ -226,11 +226,28 @@ with tab2:
             for f in t2_or: st.success(f"✅ {f.name}")
 
     st.markdown("")
+    cd, ce = st.columns(2)
+    with cd:
+        st.markdown("**④ Order.all 全部订单**（选填，可多选）")
+        st.caption("用来显示取消单、退货单、下个月才到款的单")
+        t2_orders = st.file_uploader("Order All", type=["xlsx","xls"], key="t2_orders",
+                                      accept_multiple_files=True, label_visibility="collapsed")
+        if t2_orders:
+            for f in t2_orders: st.success(f"✅ {f.name}")
+    with ce:
+        st.markdown("**⑤ Wallet Balance 报告**（选填，可多选）")
+        st.caption("用来显示包裹遗失赔偿、物流赔偿")
+        t2_wallet = st.file_uploader("Wallet", type=["xlsx","xls"], key="t2_wallet",
+                                      accept_multiple_files=True, label_visibility="collapsed")
+        if t2_wallet:
+            for f in t2_wallet: st.success(f"✅ {f.name}")
+
+    st.markdown("")
 
     all_3 = t2_5151 and t2_income and t2_or
     if not all_3:
         missing = []
-        if not t2_5151:  missing.append("5151 文件")
+        if not t2_5151:  missing.append("ACC INV 文件")
         if not t2_income: missing.append("Income 文件")
         if not t2_or:    missing.append("OR 收款文件")
         st.info(f"还需要上传：{' / '.join(missing)}")
@@ -335,6 +352,50 @@ with tab2:
                             'file_name':   OR_FILE_NAMES[file_idx],
                         }
 
+                # ── Order.all: load all orders (optional) ──────────
+                ord_all = {}  # order_id → {status, cancel_reason, return_status, complete_time, grand_total}
+                if t2_orders:
+                    ord_list = []
+                    for f in t2_orders:
+                        _d = pd.read_excel(f, sheet_name='orders', header=0, dtype={'Order ID': str})
+                        _d.columns = [str(c).strip() for c in _d.columns]
+                        ord_list.append(_d)
+                    df_ord = pd.concat(ord_list, ignore_index=True).drop_duplicates(subset=['Order ID'])
+                    for _, row in df_ord.iterrows():
+                        oid = str(row['Order ID']).strip()
+                        ord_all[oid] = {
+                            'status':        str(row.get('Order Status', '') or '').strip(),
+                            'cancel_reason': str(row.get('Cancel reason', '') or '').strip(),
+                            'return_status': str(row.get('Return / Refund Status', '') or '').strip(),
+                            'complete_time': row.get('Order Complete Time', ''),
+                            'grand_total':   float(row.get('Grand Total', 0) or 0),
+                        }
+
+                # ── Wallet: load balance transactions (optional) ────
+                wallet_map = {}  # order_id → list of {type, description, direction, amount}
+                if t2_wallet:
+                    for f in t2_wallet:
+                        _raw = pd.read_excel(f, sheet_name='Transaction Report', header=None)
+                        # find header row (row with 'Transaction Type')
+                        w_hdr = 17
+                        for i in range(30):
+                            vals = [str(v) for v in _raw.iloc[i].tolist()]
+                            if 'Transaction Type' in vals:
+                                w_hdr = i; break
+                        _d = pd.read_excel(f, sheet_name='Transaction Report', header=w_hdr, dtype={'Order ID': str})
+                        _d.columns = [str(c).strip() for c in _d.columns]
+                        _d = _d.dropna(subset=['Transaction Type'])
+                        for _, row in _d.iterrows():
+                            oid = str(row.get('Order ID', '') or '').strip()
+                            if not oid or oid == 'nan': continue
+                            entry = {
+                                'type':        str(row.get('Transaction Type', '') or ''),
+                                'description': str(row.get('Description', '') or ''),
+                                'direction':   str(row.get('Money Direction', '') or ''),
+                                'amount':      float(row.get('Amount', 0) or 0) if 'Amount' in _d.columns else 0.0,
+                            }
+                            wallet_map.setdefault(oid, []).append(entry)
+
                 num_map = {
                     'Total Released Amount (RM)':              'total_released',
                     'Product Price':                           'product_price',
@@ -394,6 +455,15 @@ with tab2:
                     or_knock_off = od.get('knock_off','')
                     or_file_idx  = od.get('file_idx', None)
                     or_file_name = od.get('file_name', '')
+
+                    # Order.all info
+                    ord_info      = ord_all.get(oid, {})
+                    ord_status    = ord_info.get('status', '')
+                    ord_return    = ord_info.get('return_status', '')
+
+                    # Wallet info for this order
+                    w_entries     = wallet_map.get(oid, [])
+                    w_notes       = '; '.join(set(e['description'] for e in w_entries if 'Income' not in e['type'])) if w_entries else ''
 
                     prod_price     = round(float(r['product_price']), 2)
                     net_payout     = round(float(r['total_released']), 2)
@@ -455,7 +525,10 @@ with tab2:
                         'OR Outstanding':        or_outstanding,
                         'OR Knock Off Date':     or_knock_off,
                         'OR File':               or_file_name,
-                        'Cancelled(5151)':       'Yes' if cancelled_5151 else 'No',
+                        'Cancelled(ACC INV)':    'Yes' if cancelled_5151 else 'No',
+                        'Order Status':          ord_status,
+                        'Return/Refund Status':  ord_return,
+                        'Wallet Note':           w_notes,
                         'Issue':                 issue,
                         'row_color':             color,
                     })
@@ -487,7 +560,7 @@ with tab2:
                 ]
                 df_or_unmatched = pd.DataFrame(or_unmatched) if or_unmatched else pd.DataFrame()
 
-                df_cancel = df_main[(df_main['Refund Amount'] < 0) | (df_main['Cancelled(5151)'] == 'Yes')].copy()
+                df_cancel = df_main[(df_main['Refund Amount'] < 0) | (df_main['Cancelled(ACC INV)'] == 'Yes')].copy()
                 df_cancel['Platform Fee Charged'] = df_cancel['Platform Fees Total'].abs()
                 df_cancel['Refund Covered?'] = df_cancel.apply(
                     lambda x: 'Yes' if abs(x['Refund Amount']) >= x['Platform Fee Charged'] else 'No', axis=1)
@@ -520,7 +593,8 @@ with tab2:
                     ('Calc Subtotal',16),('Payout Gap',14),
                     ('Shipping(Buyer)',14),
                     ('Refund Amount',13),('OR Outstanding',14),('OR Knock Off Date',14),
-                    ('OR File',22),('Cancelled(5151)',12),('Issue',15),
+                    ('OR File',22),('Cancelled(ACC INV)',12),
+                    ('Order Status',14),('Return/Refund Status',18),('Wallet Note',35),('Issue',15),
                 ]
                 COL_ORDER2 = [c[0] for c in COLS2]
 
@@ -697,7 +771,7 @@ with tab2:
 
                 ws4 = wb2.create_sheet('4_Cancel_Analysis')
                 ws4.sheet_view.showGridLines = False; ws4.freeze_panes = 'A2'
-                COLS4 = [('Order ID',22),('Inv No',18),('Cancelled(5151)',13),
+                COLS4 = [('Order ID',22),('Inv No',18),('Cancelled(ACC INV)',13),
                          ('Refund Amount',14),('Commission',13),('Service Fee',12),
                          ('Txn Fee',11),('Platform Fee Charged',18),
                          ('Refund Covered?',14),('Potential Claim (RM)',18),('Issue',15)]
@@ -910,6 +984,83 @@ with tab2:
                              round(df_main['Net Payout (RM)'].sum(), 2),
                              f'{fee_pct(df_main["Net Payout (RM)"].sum()):.2f}%', '', ''],
                        clr='C8E6C9', bold=True); cur += 1
+                # ────────────────────────────────────────────────────────────
+
+                # ── Sheet 7: Special Cases ──────────────────────────────────
+                if ord_all or wallet_map:
+                    ws7 = wb2.create_sheet('7_Special_Cases')
+                    ws7.sheet_view.showGridLines = False
+                    ws7.column_dimensions['A'].width = 24
+                    ws7.column_dimensions['B'].width = 20
+                    ws7.column_dimensions['C'].width = 18
+                    ws7.column_dimensions['D'].width = 20
+                    ws7.column_dimensions['E'].width = 16
+                    ws7.column_dimensions['F'].width = 45
+
+                    def s7_title(row, text, clr):
+                        c = ws7.cell(row=row, column=1, value=text)
+                        c.fill = mk_fill(clr); c.font = Font(bold=True, color='FFFFFF', size=11)
+                        c.alignment = Alignment(horizontal='left', vertical='center')
+                        ws7.merge_cells(f'A{row}:F{row}')
+                        ws7.row_dimensions[row].height = 24
+
+                    def s7_hdr(row, labels):
+                        for ci, lbl in enumerate(labels, 1):
+                            c = ws7.cell(row=row, column=ci, value=lbl)
+                            c.fill = mk_fill('4A7DB8'); c.font = Font(bold=True, color='FFFFFF', size=10)
+                            c.alignment = Alignment(horizontal='center', vertical='center')
+                            c.border = mk_border()
+                        ws7.row_dimensions[row].height = 20
+
+                    def s7_row(row, vals, clr='FFFFFF'):
+                        for ci, val in enumerate(vals, 1):
+                            c = ws7.cell(row=row, column=ci, value=val)
+                            c.fill = mk_fill(clr); c.border = mk_border()
+                            c.font = Font(size=10)
+                            if ci > 1 and isinstance(val, (int, float)):
+                                c.number_format = '#,##0.00'
+                                c.alignment = Alignment(horizontal='right', vertical='center')
+                            else:
+                                c.alignment = Alignment(horizontal='left', vertical='center')
+                        ws7.row_dimensions[row].height = 18
+
+                    r7 = 1
+                    inc_ids_set = set(df_main['Order ID'].astype(str))
+
+                    # Section A: Cancelled before shipment
+                    if ord_all:
+                        cancelled_rows = [(oid, info) for oid, info in ord_all.items()
+                                         if info['status'] == 'Cancelled' and oid not in inc_ids_set]
+                        s7_title(r7, '① 出货前取消（Income 不会出现，正常）', '7F8C8D'); r7 += 1
+                        s7_hdr(r7, ['Order ID', 'Cancel Reason', 'Grand Total (RM)', '', '', '']); r7 += 1
+                        for oid, info in cancelled_rows[:200]:
+                            s7_row(r7, [oid, info['cancel_reason'][:60], info['grand_total'], '', '', ''], clr='E8E8E8'); r7 += 1
+                        s7_row(r7, [f'共 {len(cancelled_rows)} 张取消单', '', '', '', '', ''], clr='D5D8DC'); r7 += 2
+
+                    # Section B: Completed but payout next month
+                    if ord_all:
+                        next_month = [(oid, info) for oid, info in ord_all.items()
+                                      if info['status'] == 'Completed' and oid not in inc_ids_set]
+                        s7_title(r7, '② 已完成、下个月才到款（正常，会在下期 Income 出现）', '1A5276'); r7 += 1
+                        s7_hdr(r7, ['Order ID', 'Order Complete Time', 'Grand Total (RM)', '', '', '']); r7 += 1
+                        for oid, info in next_month[:200]:
+                            s7_row(r7, [oid, str(info['complete_time']), info['grand_total'], '', '', ''], clr='D6EAF8'); r7 += 1
+                        s7_row(r7, [f'共 {len(next_month)} 张，预计收款 RM {sum(i["grand_total"] for _,i in next_month):,.2f}', '', '', '', '', ''], clr='AED6F1'); r7 += 2
+
+                    # Section C: Wallet special transactions
+                    if wallet_map:
+                        special_wallet = []
+                        for oid, entries in wallet_map.items():
+                            for e in entries:
+                                if 'Order Income' not in e['type']:
+                                    special_wallet.append((oid, e))
+                        if special_wallet:
+                            s7_title(r7, '③ Wallet 特殊记录（包裹遗失赔偿、物流赔偿、退款扣回）', 'C0392B'); r7 += 1
+                            s7_hdr(r7, ['Order ID', 'Transaction Type', 'Money Direction', 'Amount (RM)', '', 'Description']); r7 += 1
+                            for oid, e in special_wallet:
+                                clr = 'FADBD8' if 'Out' in e['direction'] else 'D5F5E3'
+                                s7_row(r7, [oid, e['type'], e['direction'], e['amount'], '', e['description'][:60]], clr=clr); r7 += 1
+                            s7_row(r7, [f'共 {len(special_wallet)} 笔特殊钱包记录', '', '', '', '', ''], clr='D5D8DC'); r7 += 1
                 # ────────────────────────────────────────────────────────────
 
                 buf2 = io.BytesIO()
