@@ -697,14 +697,14 @@ with tab2:
                 ws2b.row_dimensions[hdr_row_xl].height = 32
                 ws2b.freeze_panes = ws2b.cell(row=hdr_row_xl + 1, column=1).coordinate
 
-                # Override write_rows to start after legend
+                # Write rows starting at a given row (with color legend above)
                 def write_rows_offset(ws, df, col_order, start_row):
                     bdr = mk_border()
-                    rows_data = df[col_order].values.tolist()
-                    colors    = df['row_color'].tolist() if 'row_color' in df.columns else ['FFFFFF']*len(df)
-                    for r_i, (row_vals, clr) in enumerate(zip(rows_data, colors), start_row):
+                    for r_i, (_, row) in enumerate(df.iterrows(), start_row):
+                        clr = row.get('row_color', 'FFFFFF')
                         fill_row = mk_fill(clr)
-                        for c_i, (col, val) in enumerate(zip(col_order, row_vals), 1):
+                        for c_i, col in enumerate(col_order, 1):
+                            val = row.get(col, '')
                             if isinstance(val, float) and pd.isna(val): val = ''
                             cell = ws.cell(row=r_i, column=c_i, value=val)
                             cell.border = bdr
