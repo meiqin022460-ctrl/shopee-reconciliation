@@ -97,77 +97,76 @@ with tab1:
                 ship_to_inv = dict(zip(df5['Shipping Info'].astype(str),
                                        df5['Doc. No.'].astype(str)))
 
-                # Load Income with openpyxl to preserve original formatting
+                # Load Income with pandas (fast — find header row first)
                 t1_income.seek(0)
-                wb = load_workbook(t1_income)
-                ws = wb['Income']
+                raw = pd.read_excel(t1_income, sheet_name='Income', header=None)
+                hdr_idx = 2  # default
+                for i in range(min(10, len(raw))):
+                    if 'Order ID' in raw.iloc[i].astype(str).values:
+                        hdr_idx = i; break
+                t1_income.seek(0)
+                df_inc2 = pd.read_excel(t1_income, sheet_name='Income', header=hdr_idx,
+                                        dtype={'Order ID': str})
+                df_inc2.columns = [str(c).strip() for c in df_inc2.columns]
 
-                # Find header row (row with "Order ID")
-                hdr_row = None
-                order_id_col = None
-                for row in ws.iter_rows(min_row=1, max_row=10):
-                    for cell in row:
-                        if str(cell.value).strip() == 'Order ID':
-                            hdr_row = cell.row
-                            order_id_col = cell.column
-                            break
-                    if hdr_row:
-                        break
-
-                if not hdr_row:
+                if 'Order ID' not in df_inc2.columns:
                     st.error("找不到 'Order ID' 列，请确认文件格式正确。")
                     st.stop()
 
-                # Find "View By" column to filter out SKU rows
-                view_by_col = None
-                for cell in ws[hdr_row]:
-                    if str(cell.value).strip() == 'View By':
-                        view_by_col = cell.column
-                        break
+                # Keep only Order rows (drop SKU rows)
+                if 'View By' in df_inc2.columns:
+                    df_inc2 = df_inc2[df_inc2['View By'].astype(str).str.strip() == 'Order'].reset_index(drop=True)
 
-                # Delete SKU rows (keep only View By == 'Order'), scan bottom-up to avoid index shift
-                if view_by_col:
-                    rows_to_delete = []
-                    for row_num in range(hdr_row + 1, ws.max_row + 1):
-                        val = str(ws.cell(row=row_num, column=view_by_col).value or '').strip()
-                        if val and val != 'Order':
-                            rows_to_delete.append(row_num)
-                    for row_num in reversed(rows_to_delete):
-                        ws.delete_rows(row_num)
-
-                # Insert new column right after Order ID column
-                new_col = order_id_col + 1
-                ws.insert_cols(new_col)
-
-                # Add "Inv No" header with yellow fill — right next to Order ID
-                yellow = mk_fill('FFFF00')
-                hdr_cell = ws.cell(row=hdr_row, column=new_col, value='Inv No')
-                hdr_cell.fill = yellow
-                hdr_cell.font = Font(bold=True)
-                hdr_cell.alignment = Alignment(horizontal='center')
-                ws.column_dimensions[get_column_letter(new_col)].width = 18
-
-                # Fill Inv No for each data row
-                matched = 0
-                unmatched = 0
-                for row_num in range(hdr_row + 1, ws.max_row + 1):
-                    oid = ws.cell(row=row_num, column=order_id_col).value
-                    if oid is None:
-                        continue
-                    oid_str = str(oid).strip()
-                    inv = ship_to_inv.get(oid_str, '')
+                # Add Inv No column right after Order ID
+                inv_vals, red_flag = [], []
+                for oid in df_inc2['Order ID'].astype(str):
+                    inv = ship_to_inv.get(oid.strip(), '')
                     if inv and inv != 'nan':
-                        c = ws.cell(row=row_num, column=new_col, value=inv)
-                        c.fill = yellow
-                        matched += 1
+                        inv_vals.append(inv); red_flag.append(False)
                     else:
-                        c = ws.cell(row=row_num, column=new_col, value='❌ 找不到')
-                        c.fill = mk_fill('FFB3B3')
-                        c.font = Font(color='CC0000')
-                        unmatched += 1
+                        inv_vals.append('❌ 找不到'); red_flag.append(True)
+
+                matched   = sum(1 for f in red_flag if not f)
+                unmatched = sum(1 for f in red_flag if f)
+
+                oid_pos = df_inc2.columns.tolist().index('Order ID')
+                cols_before = df_inc2.columns.tolist()[:oid_pos+1]
+                cols_after  = df_inc2.columns.tolist()[oid_pos+1:]
+                df_inc2.insert(oid_pos + 1, 'Inv No', inv_vals)
+
+                # Write to Excel with minimal formatting (fast)
+                wb2 = Workbook()
+                ws2 = wb2.active; ws2.title = 'Income'
+                ws2.freeze_panes = 'A2'
+                col_order_out = cols_before + ['Inv No'] + cols_after
+
+                # Header row
+                yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+                red_fill    = PatternFill(start_color='FFB3B3', end_color='FFB3B3', fill_type='solid')
+                hdr_fill    = PatternFill(start_color='2F4F8F', end_color='2F4F8F', fill_type='solid')
+                hdr_font    = Font(bold=True, color='FFFFFF')
+                for c_i, col in enumerate(col_order_out, 1):
+                    cell = ws2.cell(row=1, column=c_i, value=col)
+                    if col == 'Inv No':
+                        cell.fill = yellow_fill; cell.font = Font(bold=True)
+                    else:
+                        cell.fill = hdr_fill; cell.font = hdr_font
+                ws2.column_dimensions[get_column_letter(col_order_out.index('Inv No')+1)].width = 18
+                ws2.column_dimensions['A'].width = 22
+
+                # Data rows
+                for r_i, (_, row) in enumerate(df_inc2[col_order_out].iterrows(), 2):
+                    is_red = red_flag[r_i - 2]
+                    for c_i, col in enumerate(col_order_out, 1):
+                        val = row[col]
+                        if isinstance(val, float) and pd.isna(val): val = ''
+                        cell = ws2.cell(row=r_i, column=c_i, value=val)
+                        if col == 'Inv No':
+                            cell.fill = red_fill if is_red else yellow_fill
+                            if is_red: cell.font = Font(color='CC0000')
 
                 buf = io.BytesIO()
-                wb.save(buf)
+                wb2.save(buf)
                 buf.seek(0)
 
             # Results
