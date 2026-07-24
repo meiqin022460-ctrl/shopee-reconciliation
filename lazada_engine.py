@@ -572,6 +572,7 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
     r_i = 3
     AMT_FMT = '#,##0.00'
     grand_total = 0.0
+    category_totals = {}
     for cat, names in CATEGORY_MAP:
         cat_total = 0.0
         if names:
@@ -618,6 +619,7 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
         ca.alignment = Alignment(horizontal='left'); cb.alignment = Alignment(horizontal='left')
         r_i += 1
         grand_total += cat_total if cat != 'Sales' else 0.0
+        category_totals[cat] = cat_total
 
     if leftover_names:
         for name in leftover_names:
@@ -781,5 +783,37 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
         'total_net_revenue': float(total_net_revenue),
         'total_fees_charged_on_cancel': float(total_fees_charged_on_cancel),
         'df_prob': df_prob,
+        # PDF-matching (Sheet 6) figures - this is the ledger scoped exactly
+        # like the official Lazada PDF statement, for cross-checking against it.
+        'pdf_sales': float(sales_total),
+        'pdf_category_totals': {k: float(v) for k, v in category_totals.items()},
+        'pdf_total_settlement': float(grand_total_with_sales),
     }
     return buf, stats
+
+
+def parse_pdf_statement(pdf_file):
+    """Extract the Income summary category totals from a Lazada 'My Income
+    Statement' PDF. Returns a dict with sales/lazada_fees/logistics/
+    marketing_fees/claims/total_settlement, or None if the expected line
+    isn't found (e.g. wrong PDF, or a layout Lazada has changed)."""
+    import re
+    import pypdf
+    reader = pypdf.PdfReader(pdf_file)
+    text = '\n'.join((p.extract_text() or '') for p in reader.pages)
+
+    m = re.search(
+        r'Settlement\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+'
+        r'(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})', text)
+    if not m:
+        return None
+    nums = [float(g.replace(',', '')) for g in m.groups()]
+    result = {
+        'sales': nums[0], 'lazada_fees': nums[1], 'logistics': nums[2],
+        'marketing_fees': nums[3], 'claims': nums[4], 'total_settlement': nums[5],
+    }
+    period = re.search(r'Statement from\s+(\d{1,2}/\d{1,2}/\d{4})\s+to\s+(\d{1,2}/\d{1,2}/\d{4})', text)
+    if period:
+        result['period_start'] = period.group(1)
+        result['period_end'] = period.group(2)
+    return result

@@ -1189,6 +1189,13 @@ with tab3:
             for f in lz_wallet: st.success(f"✅ {f.name}")
 
     st.markdown("")
+    st.markdown("**⑥ Lazada 官方 PDF 月结单**（选填，用来自动核对数字对不对）")
+    lz_pdf = st.file_uploader("PDF Statement", type=["pdf"], key="lz_pdf",
+                               label_visibility="collapsed")
+    if lz_pdf:
+        st.success(f"✅ {lz_pdf.name}")
+
+    st.markdown("")
 
     lz_ready = lz_income and lz_accinv
     if not lz_ready:
@@ -1228,6 +1235,50 @@ with tab3:
                 lz_ic = lz_df_prob['Issue'].value_counts().reset_index()
                 lz_ic.columns = ['问题类型','数量']
                 st.dataframe(lz_ic, use_container_width=True, hide_index=True)
+
+            if lz_pdf:
+                st.markdown("---")
+                st.subheader("📑 PDF 官方月结单核对")
+                lz_pdf.seek(0)
+                try:
+                    pdf_data = le.parse_pdf_statement(lz_pdf)
+                except Exception as e:
+                    pdf_data = None
+                    st.warning(f"PDF 读取失败：{e}")
+
+                if pdf_data is None:
+                    st.warning("这份 PDF 抓不到数字，请确认上传的是 Lazada 的 My Income Statement PDF。")
+                else:
+                    date_mismatch = False
+                    if pdf_data.get('period_start'):
+                        try:
+                            pdf_start = pd.to_datetime(pdf_data['period_start'], dayfirst=True).date()
+                            pdf_end = pd.to_datetime(pdf_data['period_end'], dayfirst=True).date()
+                            if pdf_start != lz_start or pdf_end != lz_end:
+                                date_mismatch = True
+                                st.warning(f"⚠️ 你选的对账日期（{lz_start} 至 {lz_end}）跟这份 PDF 的范围"
+                                           f"（{pdf_data['period_start']} 至 {pdf_data['period_end']}）不一样，"
+                                           f"下面数字对不上是正常的 —— 先把上面的日期改成跟 PDF 一致，再重新生成一次。")
+                        except Exception:
+                            pass
+
+                    cmp_rows = [
+                        ("Sales（货款）", pdf_data['sales'], lz_stats['pdf_sales']),
+                        ("Lazada Fees", pdf_data['lazada_fees'], lz_stats['pdf_category_totals'].get('Lazada Fees', 0)),
+                        ("Marketing Fees", pdf_data['marketing_fees'], lz_stats['pdf_category_totals'].get('Marketing Fees', 0)),
+                        ("Logistics", pdf_data['logistics'], lz_stats['pdf_category_totals'].get('Logistics', 0)),
+                        ("Claims", pdf_data['claims'], lz_stats['pdf_category_totals'].get('Claims', 0)),
+                        ("Total Settlement", pdf_data['total_settlement'], lz_stats['pdf_total_settlement']),
+                    ]
+                    cmp_df = pd.DataFrame(cmp_rows, columns=['项目', 'PDF 数字', '报表算出来'])
+                    cmp_df['差异'] = (cmp_df['PDF 数字'] - cmp_df['报表算出来']).round(2)
+                    cmp_df['状态'] = cmp_df['差异'].abs().apply(lambda x: '✅ 一样' if x < 0.01 else '❌ 不一样')
+                    st.dataframe(cmp_df, use_container_width=True, hide_index=True)
+
+                    if (cmp_df['差异'].abs() < 0.01).all():
+                        st.success("PDF 数字跟报表完全对上，没有问题！")
+                    elif not date_mismatch:
+                        st.error("有数字对不上，而且日期范围是一致的 —— 建议检查一下 Income Overview 有没有涵盖完整的月份。")
 
             st.caption("💡 报表里面 Sheet 2 是照下单日期算，Sheet 9 是照结算日期算（Summary 用的是这个），"
                        "两个角度都保留，详细说明都写在每个 Sheet 最上面。")
