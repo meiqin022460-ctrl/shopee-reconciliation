@@ -3,10 +3,11 @@ import pandas as pd
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-import io, warnings, os
+import io, warnings, os, datetime
 warnings.filterwarnings('ignore')
+import lazada_engine as le
 
-st.set_page_config(page_title="Shopee 对账系统", page_icon="📊", layout="centered")
+st.set_page_config(page_title="电商对账系统", page_icon="📊", layout="centered")
 
 # ── Password protection ─────────────────────────────────
 def check_password():
@@ -15,7 +16,7 @@ def check_password():
         st.session_state.authenticated = False
     if st.session_state.authenticated:
         return True
-    st.title("📊 Shopee 对账系统")
+    st.title("📊 电商对账系统")
     st.markdown("---")
     pw = st.text_input("请输入密码：", type="password")
     if st.button("登录", type="primary"):
@@ -30,7 +31,7 @@ if not check_password():
     st.stop()
 # ────────────────────────────────────────────────────────
 
-st.title("📊 Shopee 对账系统")
+st.title("📊 电商对账系统")
 st.markdown("---")
 
 # ── Shared helpers ─────────────────────────────────────
@@ -58,7 +59,7 @@ def safe_num(s):
 # ══════════════════════════════════════════════════════
 # TWO TABS
 # ══════════════════════════════════════════════════════
-tab1, tab2 = st.tabs(["① 加 Inv No 到 Income 文件", "② 完整对账报告（含 OR）"])
+tab1, tab2, tab3 = st.tabs(["① 加 Inv No 到 Income 文件", "② Shopee 完整对账报告（含 OR）", "🟠 Lazada 完整对账报告"])
 
 
 # ╔════════════════════════════════════════════════════╗
@@ -1125,6 +1126,117 @@ with tab2:
                 label="📥  下载完整对账报告 Excel",
                 data=buf2,
                 file_name="Reconciliation_Report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True,
+            )
+
+
+# ╔════════════════════════════════════════════════════╗
+# ║  TAB 3 — Lazada Full Reconciliation                ║
+# ╚════════════════════════════════════════════════════╝
+with tab3:
+    st.subheader("Lazada 完整对账")
+    st.caption("上传文件 → 生成彩色对账报告，自动算运费、少给钱、取消单等全部情况")
+    st.markdown("")
+
+    _today = datetime.date.today()
+    _first_of_this_month = _today.replace(day=1)
+    _last_month_end = _first_of_this_month - datetime.timedelta(days=1)
+    _last_month_start = _last_month_end.replace(day=1)
+
+    dcol1, dcol2 = st.columns(2)
+    with dcol1:
+        lz_start = st.date_input("对账开始日期", value=_last_month_start, key="lz_start")
+    with dcol2:
+        lz_end = st.date_input("对账结束日期", value=_last_month_end, key="lz_end")
+
+    st.markdown("")
+    la, lb = st.columns(2)
+    with la:
+        st.markdown("**① Income Overview**（Lazada 收入明细，必须）")
+        lz_income = st.file_uploader("Income Overview", type=["xlsx","xls"], key="lz_income",
+                                      accept_multiple_files=True, label_visibility="collapsed")
+        if lz_income:
+            for f in lz_income: st.success(f"✅ {f.name}")
+    with lb:
+        st.markdown("**② ACC INV 发票登记表**（必须）")
+        lz_accinv = st.file_uploader("ACC INV", type=["xlsx","xls"], key="lz_accinv",
+                                      accept_multiple_files=True, label_visibility="collapsed")
+        if lz_accinv:
+            for f in lz_accinv: st.success(f"✅ {f.name}")
+
+    st.markdown("")
+    lc, ld, le_col = st.columns(3)
+    with lc:
+        st.markdown("**③ Lazada Order Export**（选填，强烈建议）")
+        st.caption("Seller Center 的 Manage Orders 导出，用来算真实运费")
+        lz_orders = st.file_uploader("Order Export", type=["xlsx","xls"], key="lz_orders",
+                                      accept_multiple_files=True, label_visibility="collapsed")
+        if lz_orders:
+            for f in lz_orders: st.success(f"✅ {f.name}")
+    with ld:
+        st.markdown("**④ OR 收款文件**（选填）")
+        lz_or = st.file_uploader("OR", type=["xlsx","xls"], key="lz_or",
+                                  accept_multiple_files=True, label_visibility="collapsed")
+        if lz_or:
+            for f in lz_or: st.success(f"✅ {f.name}")
+    with le_col:
+        st.markdown("**⑤ 钱包 Balance Transactions**（选填）")
+        lz_wallet = st.file_uploader("Wallet", type=["xlsx","xls"], key="lz_wallet",
+                                      accept_multiple_files=True, label_visibility="collapsed")
+        if lz_wallet:
+            for f in lz_wallet: st.success(f"✅ {f.name}")
+
+    st.markdown("")
+
+    lz_ready = lz_income and lz_accinv
+    if not lz_ready:
+        missing = []
+        if not lz_income: missing.append("Income Overview")
+        if not lz_accinv: missing.append("ACC INV 文件")
+        st.info(f"还需要上传：{' / '.join(missing)}")
+    else:
+        if st.button("🚀  开始 Lazada 对账", type="primary", use_container_width=True, key="btn_lz"):
+            with st.spinner("匹配中，请稍等..."):
+                try:
+                    buf, lz_stats = le.build_lazada_report(
+                        lz_income, lz_accinv, lz_or or [], lz_orders or [], lz_wallet or [],
+                        pd.Timestamp(lz_start), pd.Timestamp(lz_end)
+                    )
+                except Exception as e:
+                    st.error(f"处理出错：{e}")
+                    st.stop()
+
+            st.success("对账完成！")
+            r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+            r1c1.metric("总订单数", lz_stats['total_orders'])
+            r1c2.metric("🔵 OK", lz_stats['ok_cnt'])
+            r1c3.metric("🟣 疑似少给钱", lz_stats['mismatch_cnt'])
+            r1c4.metric("🔴 找不到发票", lz_stats['no_inv'])
+
+            r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+            r2c1.metric("净收入 (RM)", f"{lz_stats['total_released']:,.2f}")
+            r2c2.metric("真实运费 (RM)", f"{lz_stats['total_shipfee_settlement']:,.2f}")
+            r2c3.metric("扣运费后净收入 (RM)", f"{lz_stats['total_net_revenue']:,.2f}")
+            r2c4.metric("疑似少给的钱 (RM)", f"{lz_stats['total_underpaid']:,.2f}")
+
+            lz_df_prob = lz_stats['df_prob']
+            if len(lz_df_prob) > 0:
+                st.markdown("---")
+                st.subheader(f"⚠️ 问题清单（{len(lz_df_prob)} 张单）")
+                lz_ic = lz_df_prob['Issue'].value_counts().reset_index()
+                lz_ic.columns = ['问题类型','数量']
+                st.dataframe(lz_ic, use_container_width=True, hide_index=True)
+
+            st.caption("💡 报表里面 Sheet 2 是照下单日期算，Sheet 9 是照结算日期算（Summary 用的是这个），"
+                       "两个角度都保留，详细说明都写在每个 Sheet 最上面。")
+
+            st.markdown("---")
+            st.download_button(
+                label="📥  下载 Lazada 对账报告 Excel",
+                data=buf,
+                file_name="Lazada_Reconciliation_Report.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
                 use_container_width=True,
