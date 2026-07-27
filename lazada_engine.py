@@ -164,6 +164,41 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
         real_shipfee_map = orders_export.groupby('orderNumber')['shippingFee'].sum(min_count=1).to_dict()
         real_shipfee_by_line = orders_export.set_index('orderItemId')['shippingFee'].to_dict()
 
+    # ── OR vs Income Overview vs Real Shipping Fee cross-check (Sheet 11) ──
+    # Reverse ACC INV lookup: Doc No -> Order Number, so every invoice in the
+    # OR collection file can be traced back to its order, then checked
+    # against (1) whether Income Overview has that order at all, and
+    # (2) whether the Order Export has a real shippingFee for it.
+    docno_to_order = {info['Doc. No.']: order for order, info in acc_info.items()}
+    income_orders_all = set(inc_all['Order Number'])
+    df_or_shipfee_check = None
+    if or_map:
+        check_rows = []
+        for inv_no, od in or_map.items():
+            order_no = docno_to_order.get(inv_no, '')
+            in_income = bool(order_no) and order_no in income_orders_all
+            shipfee = real_shipfee_map.get(order_no) if order_no else None
+            has_shipfee = shipfee is not None and not pd.isna(shipfee)
+            if not order_no:
+                status = 'Inv No not in ACC INV'
+            elif not in_income:
+                status = 'Not in Income Overview'
+            elif not has_shipfee:
+                status = 'Not in Order Export'
+            else:
+                status = 'OK'
+            check_rows.append({
+                'Order Number': order_no or '(not found in ACC INV)',
+                'Inv No': inv_no,
+                'OR Org Amt': round(od['org_amt'], 2),
+                'OR Paid Amount': round(od['paid'], 2),
+                'In Income Overview?': 'Yes' if in_income else 'No',
+                'Real Shipping Fee(RM)': round(float(shipfee), 2) if has_shipfee else None,
+                'Status': status,
+            })
+        df_or_shipfee_check = pd.DataFrame(check_rows).sort_values(
+            ['Status', 'Order Number'], ascending=[False, True])
+
     # ── Load Wallet (Balance Transactions) ─────────────
     df_wallet = pd.DataFrame()
     if wallet_files:
@@ -402,6 +437,7 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
         ('8_Full_Reconciliation_AllMonths = 全部订单,不分月份', '', None, False),
         ('9_By_SettlementDate = 这个月结算到钱的单(现金流角度,Summary用这份)', '', None, False),
         ('10_ShipFee_PDF_Detail = PDF口径运费的逐行明细', '', None, False),
+        ('11_OR_vs_ShipFee = OR里有的单 vs Order Export 有没有运费', '', None, False),
     ]
 
     for i, (lbl, val, bg, is_sec) in enumerate(summary_sections, 3):
@@ -776,6 +812,45 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
                               value=round(float(shipfee_pdf_scope), 2))
         tot_cell.number_format = '#,##0.00'; tot_cell.font = Font(bold=True)
         tot_cell.fill = mk_fill(C_GREEN)
+
+    # ── Sheet 11: OR orders vs Real Shipping Fee (Order Export) ────────
+    if df_or_shipfee_check is not None and len(df_or_shipfee_check):
+        ws11 = wb.create_sheet('11_OR_vs_ShipFee')
+        ws11.sheet_view.showGridLines = False
+        ws11.freeze_panes = 'A3'
+
+        COLS11 = [('Order Number', 18), ('Inv No', 16), ('OR Org Amt', 13),
+                  ('OR Paid Amount', 14), ('In Income Overview?', 16),
+                  ('Real Shipping Fee(RM)', 18), ('Status', 24)]
+        COL_ORDER11 = [c[0] for c in COLS11]
+        n_missing = (df_or_shipfee_check['Status'] != 'OK').sum()
+        write_note(ws11, (f'反过来查:你的 OR 收款记录里,一共 {len(df_or_shipfee_check)} 张发票,'
+                           '逐一检查 (1) Income Overview 里有没有这张单, (2) Order Export 有没有它的真实运费。'
+                           f'红色 = {n_missing} 张单有问题 - "Not in Income Overview"是这次的 Income 资料完全没有'
+                           '这张单(可能是别的月份、或者资料没给齐); "Not in Order Export"是有单但查不到运费; '
+                           '"Inv No not in ACC INV"是连你的发票登记表都找不到这个发票号。'
+                           '绿色 OK = 三样都对得上,Real Shipping Fee(RM) 就是那笔运费。'),
+                  len(COL_ORDER11), height=68)
+        write_header(ws11, 2, COL_ORDER11, [c[1] for c in COLS11])
+        ws11.row_dimensions[2].height = 28
+        AMT_COLS11 = {'OR Org Amt', 'OR Paid Amount', 'Real Shipping Fee(RM)'}
+
+        for r_i, (_, row) in enumerate(df_or_shipfee_check.iterrows(), 3):
+            row_clr = C_GREEN if row['Status'] == 'OK' else C_RED
+            for c_i, col in enumerate(COL_ORDER11, 1):
+                val = row.get(col, '')
+                if isinstance(val, float) and pd.isna(val):
+                    val = ''
+                cell = ws11.cell(row=r_i, column=c_i, value=val)
+                cell.fill = mk_fill(row_clr); cell.border = mk_border()
+                if col in AMT_COLS11:
+                    cell.number_format = '#,##0.00'
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                elif col in ('Order Number', 'Inv No'):
+                    cell.number_format = '@'
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
+                else:
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
 
     # ── Save to bytes ────────────────────────────────────
     buf = io.BytesIO()
