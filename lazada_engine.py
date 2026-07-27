@@ -300,8 +300,10 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
         pdf_scope_lines = inc_period[inc_period['Fee Name'].isin(['Item Price Credit', 'Lost Claim'])].copy()
         pdf_scope_lines['Real Shipping Fee(RM)'] = pdf_scope_lines['Order Line ID'].map(real_shipfee_by_line)
         shipfee_pdf_scope = pdf_scope_lines['Real Shipping Fee(RM)'].sum()
+        pdf_scope_lines['Inv No'] = pdf_scope_lines['Order Number'].map(lambda o: acc_info.get(o, {}).get('Doc. No.', ''))
+        pdf_scope_lines['In OR?'] = pdf_scope_lines['Inv No'].apply(lambda inv: 'Yes' if inv and inv in or_map else 'No')
         df_shipfee_detail = pdf_scope_lines[pdf_scope_lines['Real Shipping Fee(RM)'].fillna(0) != 0][
-            ['Order Number', 'Order Line ID', 'Transaction Date', 'Fee Name', 'Amount(Include Tax)',
+            ['Order Number', 'Inv No', 'In OR?', 'Order Line ID', 'Transaction Date', 'Fee Name', 'Amount(Include Tax)',
              'Seller SKU', 'Product Name', 'Real Shipping Fee(RM)']
         ].sort_values('Real Shipping Fee(RM)', ascending=False)
 
@@ -736,30 +738,33 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
         ws10.sheet_view.showGridLines = False
         ws10.freeze_panes = 'A3'
 
-        COLS10 = [('Order Number', 18), ('Order Line ID', 18), ('Transaction Date', 13),
+        COLS10 = [('Order Number', 18), ('Inv No', 16), ('In OR?', 10), ('Order Line ID', 18), ('Transaction Date', 13),
                   ('Fee Name', 16), ('Amount(Include Tax)', 16), ('Seller SKU', 11),
                   ('Product Name', 34), ('Real Shipping Fee(RM)', 16)]
         COL_ORDER10 = [c[0] for c in COLS10]
         write_note(ws10, (f'这是 Sheet 6 那行 "Real Shipping Fee (not your money)" = {shipfee_pdf_scope:,.2f} '
                            f'的完整明细,一共 {len(df_shipfee_detail)} 行 - 每一行是一个 Order Line,'
                            'Fee Name 是 Item Price Credit 或 Lost Claim,Transaction Date 在这个月的 PDF 范围内,'
-                           '"Real Shipping Fee(RM)" 是从 Order Export 查到的真实运费,全部加起来就是上面那个总数。'),
-                  len(COL_ORDER10), height=48)
+                           '"Real Shipping Fee(RM)" 是从 Order Export 查到的真实运费,全部加起来就是上面那个总数。'
+                           '"In OR?"=Yes(绿色)代表这张单的发票已经在你的 OR 收款记录里找到; No(黄色)代表还没有,'
+                           '可能是 OR 资料还没给齐,或者这张单的钱还没收。'),
+                  len(COL_ORDER10), height=58)
         write_header(ws10, 2, COL_ORDER10, [c[1] for c in COLS10])
         ws10.row_dimensions[2].height = 28
         AMT_COLS10 = {'Amount(Include Tax)', 'Real Shipping Fee(RM)'}
 
         for r_i, (_, row) in enumerate(df_shipfee_detail.iterrows(), 3):
+            row_clr = C_GREEN if row.get('In OR?') == 'Yes' else C_YELLOW
             for c_i, col in enumerate(COL_ORDER10, 1):
                 val = row.get(col, '')
                 if isinstance(val, float) and pd.isna(val):
                     val = ''
                 cell = ws10.cell(row=r_i, column=c_i, value=val)
-                cell.fill = mk_fill(C_YELLOW); cell.border = mk_border()
+                cell.fill = mk_fill(row_clr); cell.border = mk_border()
                 if col in AMT_COLS10:
                     cell.number_format = '#,##0.00'
                     cell.alignment = Alignment(horizontal='right', vertical='center')
-                elif col in ('Order Number', 'Order Line ID'):
+                elif col in ('Order Number', 'Order Line ID', 'Inv No'):
                     cell.number_format = '@'
                     cell.alignment = Alignment(horizontal='left', vertical='center')
                 else:
