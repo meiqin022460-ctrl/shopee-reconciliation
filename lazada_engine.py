@@ -123,6 +123,20 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
         (inc_all['Transaction Date_dt'] <= FILTER_END), 'Order Number'])
     inc_settlement = inc_all[inc_all['Order Number'].isin(orders_by_settlement)].copy()
 
+    # Neither view found a single order for this period - almost always means
+    # the selected month doesn't match what's actually in the uploaded Income
+    # Overview file(s). Fail with a clear, specific message instead of a
+    # confusing crash further down (an empty result has no columns at all).
+    if not orders_in_period and not orders_by_settlement:
+        actual_min = inc_all['Transaction Date_dt'].min()
+        actual_max = inc_all['Transaction Date_dt'].max()
+        range_txt = (f"{actual_min:%Y-%m-%d} 到 {actual_max:%Y-%m-%d}"
+                     if pd.notna(actual_min) and pd.notna(actual_max) else "无法读出日期")
+        raise ValueError(
+            f"选的月份（{FILTER_START:%Y-%m-%d} 到 {FILTER_END:%Y-%m-%d}）里，"
+            f"Income Overview 完全没有任何一张单。这份文件实际的日期范围是：{range_txt}。"
+            f"请检查月份选对了没有，或者这份文件是不是对的月份。")
+
     inc_period = inc_all[(inc_all['Transaction Date_dt'] >= FILTER_START) &
                           (inc_all['Transaction Date_dt'] <= FILTER_END)].copy()
 
@@ -300,6 +314,19 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
                 'Issue':               issue,
                 'row_color':           color,
             })
+        if not rows:
+            # Keep the schema even with zero matching orders, so downstream
+            # code (which reads specific columns like 'Order Number') doesn't
+            # crash on a column-less empty frame.
+            return pd.DataFrame(columns=[
+                'Order Number', 'Inv No', 'Invoice Date', 'Order Creation Date', 'Order Status',
+                'Product Name', 'ACC INV Sub-Total', 'Income Item Price', 'Lost Claim',
+                'Real Shipping Fee(RM)', 'Gross Diff(Income-Inv)', 'Price Ratio(vs Inv)',
+                'Underpaid Amount(RM)', 'Commission', 'Payment Fee', 'LazCoins Discount',
+                'LazCoins Promo Fee', 'Sponsored Affiliates', 'Other Fees', 'Total Released(Net)',
+                'Net Revenue(excl.ShipFee)', 'OR Paid Amount', 'OR Outstanding',
+                'Cancelled(ACC INV)', 'Issue', 'row_color',
+            ])
         return pd.DataFrame(rows)
 
     df_main = build_reconciliation(inc)
