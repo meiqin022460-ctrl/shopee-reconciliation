@@ -373,6 +373,71 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
     leftover_names = [n for n in fee_name_totals.index if n not in known_names]
     sales_total = fee_name_totals.get('Item Price Credit', 0.0)
 
+    # ── Algorithm B: daily Logistics Fee by wallet reverse-derivation ──
+    # Logistics Fee (Algo B) = that day's ACC INV Sub-Total(ex) total
+    #   - |Lazada Fees| - |Marketing Fees| - actual wallet Deposit that day.
+    # Same day-scope as the PDF ledger (Transaction Date). Needs the wallet
+    # file; if a real Order Export is also available, shows it alongside
+    # for comparison (two independent ways to estimate the same thing).
+    df_logistics_b = None
+    if len(df_wallet):
+        scope = inc_period.copy()
+        order_day = scope.groupby('Order Number')['Transaction Date_dt'].first()
+        order_subtotal = order_day.index.to_series().map(lambda o: acc_info.get(o, {}).get('Sub-Total (ex)'))
+        subtotal_by_day = pd.DataFrame({'d': order_day, 'v': order_subtotal}).groupby('d')['v'].sum(min_count=1)
+        order_count_by_day = scope.groupby('Transaction Date_dt')['Order Number'].nunique()
+
+        # NOTE: Algorithm B uses its OWN category split, different from the
+        # PDF-matching CATEGORY_MAP above (verified line-by-line against a
+        # real reference file - every single day matched to the cent):
+        # LazCoins Discount is excluded entirely (it nets out elsewhere),
+        # Marketing Fees here is Sponsored Affiliates ONLY, and a Commission
+        # reversal (refund of a previously charged commission) counts
+        # towards Lazada Fees.
+        lazada_fee_names = ['Commission', 'Payment Fee', 'LazCoins Discount Promotion Fee',
+                             'Payment fee - correction for undercharge',
+                             'Commission fee - correction for undercharge', 'Buyer Review Incentive',
+                             'Reversal Commission']
+        marketing_fee_names = ['Sponsored Affiliates']
+        lazada_fees_by_day = scope[scope['Fee Name'].isin(lazada_fee_names)].groupby(
+            'Transaction Date_dt')['Amount(Include Tax)'].sum().abs()
+        marketing_fees_by_day = scope[scope['Fee Name'].isin(marketing_fee_names)].groupby(
+            'Transaction Date_dt')['Amount(Include Tax)'].sum().abs()
+
+        wallet_by_day = df_wallet[df_wallet['Type'] == 'Deposit'].groupby('Statement Date_dt')['Amount'].sum()
+
+        real_shipfee_by_day = None
+        if real_shipfee_by_line:
+            scope_ship = scope[scope['Fee Name'].isin(['Item Price Credit', 'Lost Claim'])].copy()
+            scope_ship['rsf'] = scope_ship['Order Line ID'].map(real_shipfee_by_line)
+            real_shipfee_by_day = scope_ship.groupby('Transaction Date_dt')['rsf'].sum(min_count=1)
+
+        all_days = sorted({d for d in set(subtotal_by_day.index) | set(lazada_fees_by_day.index) |
+                            set(marketing_fees_by_day.index) | set(wallet_by_day.index) if pd.notna(d)})
+        rows_b = []
+        for d in all_days:
+            sub = float(subtotal_by_day.get(d, 0.0) or 0.0)
+            laz = float(lazada_fees_by_day.get(d, 0.0) or 0.0)
+            mkt = float(marketing_fees_by_day.get(d, 0.0) or 0.0)
+            dep = float(wallet_by_day.get(d, 0.0) or 0.0)
+            logi_b = round(sub - laz - mkt - dep, 2)
+            row = {
+                'Date_dt': d, 'Date': d.strftime('%d %b %Y'),
+                'Orders': int(order_count_by_day.get(d, 0)),
+                'Sub-Total(ex) Total': round(sub, 2),
+                'Lazada Fees': round(laz, 2),
+                'Marketing Fees': round(mkt, 2),
+                'Wallet Deposit': round(dep, 2),
+                'Logistics Fee (Algo B)': logi_b,
+            }
+            if real_shipfee_by_day is not None:
+                rv = real_shipfee_by_day.get(d)
+                rv = round(float(rv), 2) if rv is not None and not pd.isna(rv) else None
+                row['Real Shipping Fee(Order Export)'] = rv
+                row['Diff (B - Real)'] = round(logi_b - rv, 2) if rv is not None else None
+            rows_b.append(row)
+        df_logistics_b = pd.DataFrame(rows_b).sort_values('Date_dt') if rows_b else None
+
     # ── Summary numbers (based on settlement-date view) ─
     total_orders   = len(df_settlement)
     matched_inv    = (df_settlement['Inv No'] != '').sum()
@@ -465,6 +530,7 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
         ('9_By_SettlementDate = 这个月结算到钱的单(现金流角度,Summary用这份)', '', None, False),
         ('10_ShipFee_PDF_Detail = PDF口径运费的逐行明细', '', None, False),
         ('11_OR_vs_ShipFee = OR里有的单 vs Order Export 有没有运费', '', None, False),
+        ('12_LogisticsFee_AlgoB = 钱包倒推法算运费(每天),不靠Order Export', '', None, False),
     ]
 
     for i, (lbl, val, bg, is_sec) in enumerate(summary_sections, 3):
@@ -878,6 +944,59 @@ def build_lazada_report(income_files, accinv_files, or_files, order_files, walle
                     cell.alignment = Alignment(horizontal='left', vertical='center')
                 else:
                     cell.alignment = Alignment(horizontal='left', vertical='center')
+
+    # ── Sheet 12: Logistics Fee, Algorithm B (wallet reverse-derivation) ──
+    if df_logistics_b is not None and len(df_logistics_b):
+        ws12 = wb.create_sheet('12_LogisticsFee_AlgoB')
+        ws12.sheet_view.showGridLines = False
+        ws12.freeze_panes = 'A3'
+
+        has_real = 'Real Shipping Fee(Order Export)' in df_logistics_b.columns
+        COLS12 = [('Date', 13), ('Orders', 9), ('Sub-Total(ex) Total', 16),
+                  ('Lazada Fees', 13), ('Marketing Fees', 14), ('Wallet Deposit', 14),
+                  ('Logistics Fee (Algo B)', 18)]
+        if has_real:
+            COLS12 += [('Real Shipping Fee(Order Export)', 22), ('Diff (B - Real)', 14)]
+        COL_ORDER12 = [c[0] for c in COLS12]
+
+        note = (f'这是另一种算法("算法B",钱包倒推法),每天算一次:'
+                f'Logistics Fee = 这天的 ACC INV Sub-Total(ex) 总额 - Lazada Fees - Marketing Fees - 钱包实际入账。'
+                f'不靠 Order Export,纯粹用发票金额、官方费用、钱包实收这三样倒推出缺口,当作运费的估计值。')
+        if has_real:
+            note += (' 这份资料刚好也有 Order Export,所以多列一栏 "Real Shipping Fee(Order Export)" 跟 '
+                      '"Diff (B - Real)" 给你比对两个算法差多少 - 差距小代表算法B这个估计值可以信。')
+        write_note(ws12, note, len(COL_ORDER12), height=64 if has_real else 48)
+        write_header(ws12, 2, COL_ORDER12, [c[1] for c in COLS12])
+        ws12.row_dimensions[2].height = 28
+        AMT_COLS12 = {'Sub-Total(ex) Total', 'Lazada Fees', 'Marketing Fees', 'Wallet Deposit',
+                      'Logistics Fee (Algo B)', 'Real Shipping Fee(Order Export)', 'Diff (B - Real)'}
+
+        r_i = 3
+        for _, row in df_logistics_b.iterrows():
+            for c_i, col in enumerate(COL_ORDER12, 1):
+                val = row.get(col, '')
+                if isinstance(val, float) and pd.isna(val):
+                    val = ''
+                cell = ws12.cell(row=r_i, column=c_i, value=val)
+                cell.border = mk_border()
+                if col in AMT_COLS12:
+                    cell.number_format = '#,##0.00'
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                else:
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
+            r_i += 1
+
+        ws12.cell(row=r_i, column=1, value=f'TOTAL').font = Font(bold=True)
+        for col in ['Orders', 'Sub-Total(ex) Total', 'Lazada Fees', 'Marketing Fees',
+                    'Wallet Deposit', 'Logistics Fee (Algo B)', 'Real Shipping Fee(Order Export)']:
+            if col not in COL_ORDER12:
+                continue
+            c_i = COL_ORDER12.index(col) + 1
+            total_val = df_logistics_b[col].sum()
+            tc = ws12.cell(row=r_i, column=c_i, value=round(float(total_val), 2))
+            tc.font = Font(bold=True); tc.fill = mk_fill(C_GREEN)
+            tc.number_format = '#,##0.00' if col != 'Orders' else '#,##0'
+            tc.alignment = Alignment(horizontal='right')
 
     # ── Save to bytes ────────────────────────────────────
     buf = io.BytesIO()
